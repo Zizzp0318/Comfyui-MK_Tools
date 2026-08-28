@@ -49,7 +49,7 @@ class MK_ImageSelector(PreviewImage):
     INPUT_IS_LIST = True
 
     @classmethod
-    def IS_CHANGED(cls, images, **kwargs):
+    def IS_CHANGED(cls, 图像, **kwargs):
         return float(time.time())
 
     def select_image(self, 图像, 模式, prompt=None, unique_id=None, extra_pnginfo=None):
