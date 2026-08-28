@@ -711,3 +711,4 @@ console.log("MK_Tools extension loaded successfully");
 import "./seed.js";
 import "./any_switch.js";
 import "./prompt_concat.js";
+import "./simple_image_compare.js";
