@@ -7,6 +7,7 @@ from .nodes.image_selection import NODE_CLASS_MAPPINGS as IMAGE_SELECTION_MAPPIN
 from .nodes.fill_holes import NODE_CLASS_MAPPINGS as FILL_HOLES_MAPPINGS
 from .nodes.any_switch import NODE_CLASS_MAPPINGS as ANY_SWITCH_MAPPINGS
 from .nodes.seed import NODE_CLASS_MAPPINGS as SEED_MAPPINGS
+from .nodes.lora_loader_stack import NODE_CLASS_MAPPINGS as LORA_LOADER_STACK_MAPPINGS
 
 # 合并所有节点映射
 NODE_CLASS_MAPPINGS = {
@@ -14,6 +15,7 @@ NODE_CLASS_MAPPINGS = {
     **FILL_HOLES_MAPPINGS,
     **ANY_SWITCH_MAPPINGS,
     **SEED_MAPPINGS,
+    **LORA_LOADER_STACK_MAPPINGS,
 }
 
 # 节点显示名称映射
@@ -22,6 +24,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_FillHoles": "MK-遮罩填充空洞",
     "MK_AnySwitch": "MK-任意切换",
     "MK_Seed": "MK-随机种子",
+    "MK_LoraLoaderStack": "MK-Lora堆加载",
 }
 
 # Web 目录
