@@ -50,6 +50,71 @@
 
 ---
 
+### 🎵 音频/视频类
+
+#### MK-音频加载 (MK Audio Loader)
+专业的音频文件加载节点，支持多种格式和波形预览。
+
+**功能特点：**
+- 支持多种音频格式（MP3、WAV、FLAC、OGG 等）
+- 实时波形预览
+- 音频信息显示（时长、采样率、声道数）
+- 拖拽上传支持
+- 大文件分块上传（最大 1GB）
+
+**来源：** [ComfyUI-xiaozhuguang](https://github.com/xiaozhuai/ComfyUI-xiaozhuguang)
+
+---
+
+#### MK-音频保存 (MK Audio Save)
+功能完整的音频保存节点，支持多种格式和质量设置。
+
+**功能特点：**
+- 支持 WAV、MP3、FLAC、OGG 格式
+- 可调整比特率和采样率
+- 实时波形预览
+- 自定义文件名前缀
+- 元数据支持
+
+**来源：** [ComfyUI-xiaozhuguang](https://github.com/xiaozhuai/ComfyUI-xiaozhuguang)
+
+---
+
+#### MK-视频加载 (MK Video Loader)
+强大的视频文件加载节点，使用 FFmpeg 解码视频帧。
+
+**功能特点：**
+- 支持多种视频格式（MP4、MKV、AVI、MOV、WEBM 等）
+- 实时视频预览播放器
+- 强制帧率转换（支持升帧/降帧，使用达芬奇同款算法）
+- 视频比例预设（9:16、16:9、1:1 等）或自定义宽高
+- 跳过帧数和帧数上限控制
+- 音频提取（双声道，44.1kHz）
+- 拖拽上传支持
+- 大文件分块上传（最大 1GB，3路并发+重试）
+- 自动 H.264 转码（兼容 WebCodecs 不支持的编码）
+
+**来源：** [ComfyUI-xiaozhuguang](https://github.com/xiaozhuai/ComfyUI-xiaozhuguang)
+
+---
+
+#### MK-视频保存 (MK Video Save)
+专业的视频合成节点，将图像序列合并为视频文件。
+
+**功能特点：**
+- 支持多种视频格式（MP4、WEBM、GIF）
+- 可调整 CRF 质量参数（0-51）
+- 可调整帧率
+- 音频轨道合并支持
+- 保存/预览双模式
+- 实时视频预览
+- 自定义文件名前缀
+- 跨 tab 预览恢复（使用本地缓存）
+
+**来源：** [ComfyUI-xiaozhuguang](https://github.com/xiaozhuai/ComfyUI-xiaozhuguang)
+
+---
+
 ### 🎭 遮罩类
 
 #### MK-遮罩填充空洞 (MK Fill Holes)
@@ -165,13 +230,19 @@ Comyui-MK_Tools/
 │   ├── lora_loader_stack.py         # Lora堆加载
 │   ├── prompt_concat.py             # 提示词拼接
 │   ├── simple_image_compare.py      # 简易图像对比
-│   └── save_image.py                # 图像保存
+│   ├── save_image.py                # 图像保存
+│   ├── audio_loader.py              # 音频加载
+│   ├── audio_save.py                # 音频保存
+│   └── video_loader.py              # 视频加载
 ├── web/                             # 前端代码
 │   ├── mk_tools.js                  # 入口
 │   ├── seed.js                      # 随机种子前端
 │   ├── any_switch.js                # 任意切换前端
 │   ├── prompt_concat.js             # 提示词拼接前端
-│   └── simple_image_compare.js      # 图像对比前端
+│   ├── simple_image_compare.js      # 图像对比前端
+│   ├── mk_audio_loader.js           # 音频加载前端
+│   ├── mk_audio_save.js             # 音频保存前端
+│   └── mk_video_loader.js           # 视频加载前端
 ├── requirements.txt                 # Python 依赖
 └── README.md                        # 本文档
 ```
@@ -207,6 +278,28 @@ Comyui-MK_Tools/
           (鼠标滑动查看差异)
 ```
 
+### 音频处理工作流
+```
+音频文件 → MK-音频加载 → 音频波形
+                ↓
+          (播放/预览)
+                ↓
+       音频处理节点 → MK-音频保存
+```
+
+### 视频处理工作流
+```
+视频文件 → MK-视频加载 → 图像序列 + 音频
+                ↓
+          (参数设置)
+          - 强制帧率: 24
+          - 视频比例: 横屏16:9
+          - 跳过帧数: 0
+          - 帧数上限: 100
+                ↓
+         图像处理工作流
+```
+
 ## 🔧 技术细节
 
 ### ComfyUI v3 兼容性
@@ -225,8 +318,21 @@ Comyui-MK_Tools/
 - **numpy** >= 1.23.0 - 数组处理
 - **torch** >= 2.0.0 - ComfyUI 核心依赖
 - **Pillow** >= 9.0.0 - 图像处理
+- **librosa** >= 0.10.0 - 音频处理
+- **soundfile** >= 0.12.0 - 音频文件读写
+- **imageio-ffmpeg** - FFmpeg 集成（视频处理）
+
+**注意：** 视频加载节点需要系统安装 FFmpeg。插件会自动检测以下位置的 FFmpeg：
+- 系统 PATH 环境变量
+- `imageio-ffmpeg` 提供的版本
+- ComfyUI 根目录的 `ffmpeg/bin/` 文件夹
 
 ## 📝 更新日志
+
+### v1.3.0 (2025-01-XX)
+- 新增 MK-音频加载节点（支持多格式、波形预览、大文件上传）
+- 新增 MK-音频保存节点（支持多格式、质量调整）
+- 新增 MK-视频加载节点（FFmpeg 解码、帧率转换、视频预览）
 
 ### v1.2.0 (2025-01-XX)
 - 新增 MK-图像保存节点（支持多格式、质量调整、仅预览模式）
@@ -253,6 +359,7 @@ Comyui-MK_Tools/
 - [yolain/ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) - 提示词拼接
 - [AlekPet/ComfyUI-Danbooru-Gallery](https://github.com/AlekPet/ComfyUI-Danbooru-Gallery) - 简易图像对比
 - [GentlemanHu/ComfyUI-ZXXNodes](https://github.com/GentlemanHu/ComfyUI-ZXXNodes) - 图像保存
+- [xiaozhuai/ComfyUI-xiaozhuguang](https://github.com/xiaozhuai/ComfyUI-xiaozhuguang) - 音频加载、音频保存、视频加载
 
 感谢所有原作者的贡献！
 

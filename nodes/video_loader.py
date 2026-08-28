@@ -1,0 +1,1099 @@
+"""
+MK-视频加载节点
+参考 Video Helper Suite 的 LoadVideoFFmpegUpload 节点，使用 FFmpeg 解码视频帧
+支持视频上传、视频文件选择、强制帧率、自定义宽高、帧数上限、起始时间等
+"""
+
+import os
+import subprocess
+import re
+import time
+import hashlib
+import numpy as np
+import torch
+import folder_paths
+from comfy.utils import ProgressBar
+
+VIDEO_EXTENSIONS = {'webm', 'mp4', 'mkv', 'gif', 'mov', 'avi', 'flv', 'wmv', 'm4v', 'mpg', 'mpeg', 'ts'}
+
+BIGMAX = int(1e9)
+DIMMAX = 16384
+ENCODE_ARGS = ['utf-8', 'replace']
+
+
+def ffmpeg_suitability(path):
+    try:
+        version = subprocess.run([path, "-version"], check=True,
+                                 capture_output=True).stdout.decode(*ENCODE_ARGS)
+    except:
+        return 0
+    score = 0
+    simple_criterion = [("libvpx", 20), ("264", 10), ("265", 3),
+                        ("svtav1", 5), ("libopus", 1)]
+    for criterion in simple_criterion:
+        if version.find(criterion[0]) >= 0:
+            score += criterion[1]
+    copyright_index = version.find('2000-2')
+    if copyright_index >= 0:
+        try:
+            score += int(version[copyright_index + 5:copyright_index + 9]) // 10
+        except:
+            pass
+    return score
+
+
+def _get_ffmpeg_path():
+    import shutil
+
+    if "VHS_FORCE_FFMPEG_PATH" in os.environ:
+        return os.environ.get("VHS_FORCE_FFMPEG_PATH")
+
+    ffmpeg_paths = []
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+        imageio_ffmpeg_path = get_ffmpeg_exe()
+        ffmpeg_paths.append(imageio_ffmpeg_path)
+    except:
+        pass
+
+    if "VHS_USE_IMAGEIO_FFMPEG" in os.environ:
+        return imageio_ffmpeg_path
+
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg is not None:
+        ffmpeg_paths.append(system_ffmpeg)
+
+    if os.path.isfile("ffmpeg"):
+        ffmpeg_paths.append(os.path.abspath("ffmpeg"))
+    if os.path.isfile("ffmpeg.exe"):
+        ffmpeg_paths.append(os.path.abspath("ffmpeg.exe"))
+
+    comfyui_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    ffmpeg_bin = os.path.join(comfyui_dir, "ffmpeg", "bin")
+    if os.path.isdir(ffmpeg_bin):
+        if os.path.isfile(os.path.join(ffmpeg_bin, "ffmpeg.exe")):
+            ffmpeg_paths.append(os.path.join(ffmpeg_bin, "ffmpeg.exe"))
+        elif os.path.isfile(os.path.join(ffmpeg_bin, "ffmpeg")):
+            ffmpeg_paths.append(os.path.join(ffmpeg_bin, "ffmpeg"))
+
+    if len(ffmpeg_paths) == 0:
+        print("[MK-视频加载] No valid ffmpeg found.")
+        return None
+    elif len(ffmpeg_paths) == 1:
+        return ffmpeg_paths[0]
+    else:
+        return max(ffmpeg_paths, key=ffmpeg_suitability)
+
+
+ffmpeg_path = _get_ffmpeg_path()
+
+
+_ffmpeg_major_version = None
+
+
+def _get_ffmpeg_major_version():
+    """获取 FFmpeg 主版本号（缓存），失败返回 0。"""
+    global _ffmpeg_major_version
+    if _ffmpeg_major_version is not None:
+        return _ffmpeg_major_version
+    if ffmpeg_path is None:
+        _ffmpeg_major_version = 0
+        return 0
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-version"],
+            capture_output=True, timeout=10
+        )
+        output = (result.stdout + result.stderr).decode(*ENCODE_ARGS)
+        match = re.search(r"ffmpeg version (\d+)", output)
+        if match:
+            _ffmpeg_major_version = int(match.group(1))
+        else:
+            _ffmpeg_major_version = 0
+    except Exception:
+        _ffmpeg_major_version = 0
+    return _ffmpeg_major_version
+
+
+def float_or_int(value, default=0):
+    try:
+        if isinstance(value, bool):
+            return int(value)
+        f = float(value)
+        if f.is_integer():
+            return int(f)
+        return f
+    except (TypeError, ValueError):
+        return default
+
+
+def calculate_file_hash(filepath):
+    try:
+        mtime = os.path.getmtime(filepath)
+        fsize = os.path.getsize(filepath)
+        h = hashlib.md5()
+        h.update(f"{filepath}|{mtime}|{fsize}".encode("utf-8"))
+        return h.hexdigest()
+    except Exception:
+        return "0"
+
+
+AUDIO_SAMPLE_RATE = 44100
+
+
+def extract_audio(video, start_time=0.0, duration=None, sample_rate=AUDIO_SAMPLE_RATE):
+    """用 FFmpeg 从视频中提取音频，返回 (waveform_tensor, sample_rate)。
+    waveform 形状: [channels, samples]，float32，范围 [-1, 1]。
+    无音轨时返回 (None, sample_rate)。
+    """
+    if start_time < 0:
+        start_time = 0.0
+
+    args = [ffmpeg_path, "-v", "error", "-vn"]
+    if start_time > 0:
+        if start_time > 4:
+            args += ["-ss", str(start_time - 4), "-i", video, "-ss", "4"]
+        else:
+            args += ["-ss", str(start_time), "-i", video]
+    else:
+        args += ["-i", video]
+
+    if duration is not None and duration > 0:
+        args += ["-t", str(duration)]
+
+    args += [
+        "-ac", "2",
+        "-ar", str(sample_rate),
+        "-f", "f32le",
+        "-",
+    ]
+
+    try:
+        proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=600)
+    except Exception as e:
+        print(f'[MK-视频加载] 音频提取失败: {e}')
+        return None, sample_rate
+
+    if proc.returncode != 0:
+        err = proc.stderr.decode(*ENCODE_ARGS)
+        if "does not contain any stream" in err or "Invalid data found" in err or "match: No such file" in err:
+            return None, sample_rate
+        print(f'[MK-视频加载] 音频提取警告 (rc={proc.returncode}): {err[:500]}')
+        return None, sample_rate
+
+    raw = proc.stdout
+    if not raw or len(raw) < 4:
+        return None, sample_rate
+
+    audio_np = np.frombuffer(raw, dtype=np.float32).reshape(-1, 2).T
+    audio_np = np.clip(audio_np, -1.0, 1.0)
+    waveform = torch.from_numpy(audio_np.astype(np.float32))
+    return waveform, sample_rate
+
+
+def target_size(width, height, custom_width, custom_height, downscale_ratio=8):
+    if downscale_ratio is None:
+        downscale_ratio = 8
+    if custom_width == 0 and custom_height == 0:
+        pass
+    elif custom_height == 0:
+        height *= custom_width / width
+        width = custom_width
+    elif custom_width == 0:
+        width *= custom_height / height
+        height = custom_height
+    else:
+        width = custom_width
+        height = custom_height
+    width = int(width / downscale_ratio + 0.5) * downscale_ratio
+    height = int(height / downscale_ratio + 0.5) * downscale_ratio
+    return width, height
+
+
+def _build_framerate_filters(force_rate, source_fps):
+    """构建帧率转换滤镜，使用与达芬奇时间线相同的 Bresenham floor 映射算法。
+
+    达芬奇算法（通过实测验证）：
+      输出的第 k 帧 = floor(k × source_fps / target_fps)
+
+    降帧（src > dst）用 ffmpeg select 滤镜实现（已通过测试验证）：
+      30→24: 丢弃第 5/10/15/20/25/30 帧
+      60→24: 保留 0,2,5,7,10,12,15,17,20,22,25,27...
+      25→24: 丢弃第 25/50/75... 帧
+      60→30: 保留偶数帧（0,2,4,...）
+
+    升帧（src < dst）返回空滤镜，由 Python 端按 floor(k*src/dst) 缓存前一帧 yield：
+      24→25: 第1帧重复一次（0,0,1,2,...,23）
+
+    Args:
+        force_rate: 目标帧率（0 表示不转换）
+        source_fps: 源视频帧率
+    Returns:
+        tuple: (filters: list[str], is_upscale: bool)
+    """
+    from math import gcd
+
+    if force_rate <= 0:
+        return [], False
+    if source_fps <= 0:
+        return [f"fps=fps={force_rate}"], False
+
+    # 升帧：返回空滤镜，由 Python 端处理帧复制
+    if force_rate > source_fps:
+        return [], True
+
+    # 等帧率：直通
+    if force_rate == source_fps:
+        return [], False
+
+    # 降帧：用 select + Bresenham floor 映射
+    # 仅处理整数帧率；非整数帧率（如 29.97）回退 fps 滤镜
+    if source_fps != int(source_fps) or force_rate != int(force_rate):
+        return [f"fps=fps={force_rate}:round=down"], False
+
+    src = int(source_fps)
+    dst = int(force_rate)
+    g = gcd(src, dst)
+    p = src // g  # 周期长度
+    q = dst // g  # 每周期保留帧数
+
+    # 周期过长 → 回退 fps 滤镜
+    if p > 120:
+        return [f"fps=fps={force_rate}:round=down"], False
+
+    # Bresenham/floor 映射：周期内保留的位置集合
+    keep_positions = sorted(set(int(k * p / q) for k in range(q)))
+    pos_exprs = [f"eq(mod(n\\,{p})\\,{pos})" for pos in keep_positions]
+    select_expr = "+".join(pos_exprs)
+    return [f"select={select_expr}"], False
+
+
+
+def ffmpeg_frame_generator(video, force_rate, frame_load_cap, skip_frames,
+                           custom_width, custom_height, downscale_ratio=8,
+                           aspect_ratio=None, ratio_mode=1, ratio_dim=0):
+    args_input = ["-i", video]
+    args_dummy = [ffmpeg_path] + args_input + ['-c', 'copy', '-frames:v', '1', "-f", "null", "-"]
+    size_base = None
+    fps_base = None
+    alpha = False
+    try:
+        dummy_res = subprocess.run(args_dummy, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.PIPE, check=True)
+    except subprocess.CalledProcessError as e:
+        raise Exception("FFmpeg probe failed:\n" + e.stderr.decode(*ENCODE_ARGS))
+    lines = dummy_res.stderr.decode(*ENCODE_ARGS)
+
+    if "Video: vp9 " in lines:
+        args_input = ["-c:v", "libvpx-vp9"] + args_input
+        args_dummy = [ffmpeg_path] + args_input + ['-c', 'copy', '-frames:v', '1', "-f", "null", "-"]
+        try:
+            dummy_res = subprocess.run(args_dummy, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.PIPE, check=True)
+        except subprocess.CalledProcessError as e:
+            raise Exception("FFmpeg probe vp9 failed:\n" + e.stderr.decode(*ENCODE_ARGS))
+        lines = dummy_res.stderr.decode(*ENCODE_ARGS)
+
+    for line in lines.split('\n'):
+        match = re.search(r"^ *Stream .* Video.*, ([1-9]|\d{2,})x(\d+)", line)
+        if match is not None:
+            size_base = [int(match.group(1)), int(match.group(2))]
+            fps_match = re.search(r", ([\d\.]+) fps", line)
+            if fps_match:
+                fps_base = float(fps_match.group(1))
+            else:
+                fps_base = 1.0
+            alpha = re.search(r"(yuva|rgba|bgra|gbra)", line) is not None
+            break
+    else:
+        raise Exception("Failed to parse video info. FFmpeg output:\n" + lines)
+
+    durs_match = re.search(r"Duration: (\d+:\d+:\d+\.\d+),", lines)
+    if durs_match:
+        durs = durs_match.group(1).split(':')
+        duration = int(durs[0]) * 3600 + int(durs[1]) * 60 + float(durs[2])
+    else:
+        duration = 0.0
+
+    # 将跳过帧数转换为起始时间（基于源视频帧率）
+    start_time = skip_frames / fps_base if fps_base > 0 else 0.0
+
+    if start_time > 0:
+        if start_time > 4:
+            post_seek = ['-ss', '4']
+            args_input = ['-ss', str(start_time - 4)] + args_input
+        else:
+            post_seek = ['-ss', str(start_time)]
+    else:
+        post_seek = []
+
+    args_all_frames = [ffmpeg_path, "-v", "error", "-an"] + args_input + ["-pix_fmt", "rgba64le"] + post_seek
+
+    # 应用视频比例约束（自定义比例时跳过）
+    if aspect_ratio and aspect_ratio != "自定义比例":
+        _ratio_map = {
+            "原始比例": None,  # 从源视频计算
+            "竖屏9:16": 9 / 16,
+            "竖屏3:4": 3 / 4,
+            "横屏16:9": 16 / 9,
+            "横屏4:3": 4 / 3,
+            "等比1:1": 1.0,
+        }
+        _ratio = _ratio_map.get(aspect_ratio)
+        if _ratio is None and aspect_ratio == "原始比例":
+            _ratio = size_base[0] / size_base[1]
+        if _ratio is not None:
+            # ratio_mode: 1=长边, 2=短边, 3=宽度, 4=高度
+            if ratio_mode == 1:  # 长边
+                if _ratio >= 1.0:  # 横屏，宽为长边
+                    custom_width = ratio_dim if ratio_dim > 0 else max(size_base[0], size_base[1])
+                    custom_height = custom_width / _ratio
+                else:  # 竖屏，高为长边
+                    custom_height = ratio_dim if ratio_dim > 0 else max(size_base[0], size_base[1])
+                    custom_width = custom_height * _ratio
+            elif ratio_mode == 2:  # 短边
+                if _ratio >= 1.0:  # 横屏，高为短边
+                    custom_height = ratio_dim if ratio_dim > 0 else min(size_base[0], size_base[1])
+                    custom_width = custom_height * _ratio
+                else:  # 竖屏，宽为短边
+                    custom_width = ratio_dim if ratio_dim > 0 else min(size_base[0], size_base[1])
+                    custom_height = custom_width / _ratio
+            elif ratio_mode == 3:  # 宽度
+                custom_width = ratio_dim if ratio_dim > 0 else size_base[0]
+                custom_height = custom_width / _ratio
+            elif ratio_mode == 4:  # 高度
+                custom_height = ratio_dim if ratio_dim > 0 else size_base[1]
+                custom_width = custom_height * _ratio
+
+    vfilters = []
+    # 帧率转换（与达芬奇相同的 Bresenham floor 映射）
+    fr_filters, is_upscale = _build_framerate_filters(force_rate, fps_base)
+    vfilters.extend(fr_filters)
+    if custom_width != 0 or custom_height != 0:
+        size = target_size(size_base[0], size_base[1], custom_width,
+                           custom_height, downscale_ratio=downscale_ratio)
+        src_ar = size_base[0] / size_base[1]
+        dst_ar = size[0] / size[1]
+        if abs(src_ar - dst_ar) < 0.01:
+            # 宽高比一致 → 仅缩放
+            vfilters.append(f"scale={size[0]}:{size[1]}")
+        else:
+            # 宽高比不同 → 缩放到覆盖目标比例后裁剪（无黑边填充）
+            vfilters.append(f"scale={size[0]}:{size[1]}:force_original_aspect_ratio=increase")
+            vfilters.append(f"crop={size[0]}:{size[1]}")
+        vfilters.append("setsar=1")
+    else:
+        size = size_base
+
+    if len(vfilters) > 0:
+        args_all_frames += ["-vf", ",".join(vfilters)]
+
+    # 用源帧数推导目标帧数，避免 ffmpeg duration 浮点精度误差
+    source_frame_count = round(fps_base * duration) if fps_base > 0 else 0
+    if force_rate and fps_base > 0:
+        yieldable_frames = source_frame_count * force_rate / fps_base
+    else:
+        yieldable_frames = source_frame_count
+    if frame_load_cap > 0:
+        yieldable_frames = min(yieldable_frames, frame_load_cap)
+
+    # 降帧时始终限制输出帧数到 floor(源帧数 × 目标帧率/源帧率)
+    if not is_upscale:
+        args_all_frames += ["-frames:v", str(int(yieldable_frames))]
+
+    yield (size_base[0], size_base[1], fps_base, duration, fps_base * duration,
+           1.0 / (force_rate or fps_base), yieldable_frames, size[0], size[1], alpha)
+
+    # 降帧时使用 passthrough 同步：FFmpeg >= 7 用 -fps_mode，< 7 用 -vsync
+    if not is_upscale:
+        if _get_ffmpeg_major_version() >= 7:
+            args_all_frames += ["-fps_mode", "passthrough"]
+        else:
+            args_all_frames += ["-vsync", "0"]
+    args_all_frames += ["-f", "rawvideo", "-"]
+
+    pbar = ProgressBar(int(yieldable_frames)) if yieldable_frames > 0 else None
+    frames_added = 0
+
+    try:
+        with subprocess.Popen(args_all_frames, stdout=subprocess.PIPE) as proc:
+            bpi = size[0] * size[1] * 8
+
+            def _read_one_frame():
+                """从 ffmpeg stdout 读取一帧，返回 numpy 数组或 None（EOF）"""
+                buf = bytearray(bpi)
+                off = 0
+                while off < bpi:
+                    chunk = proc.stdout.read(bpi - off)
+                    if not chunk:
+                        return None
+                    buf[off:off + len(chunk)] = chunk
+                    off += len(chunk)
+                frame = np.frombuffer(buf, dtype=np.dtype(np.uint16).newbyteorder("<")
+                                      ).reshape(size[1], size[0], 4) / 65535.0
+                if not alpha:
+                    frame = frame[:, :, :-1]
+                return frame
+
+            if is_upscale:
+                # 升帧：按 floor(k * src/dst) 选择/复制帧（与达芬奇一致）
+                src_n = 0
+                prev_frame = None
+                for k in range(int(yieldable_frames)):
+                    target = int(k * fps_base / force_rate)  # floor(k * src/dst)
+                    # 读取直到 src_n > target，确保 prev_frame 是 target 帧数据
+                    while src_n <= target:
+                        prev_frame = _read_one_frame()
+                        if prev_frame is None:
+                            break
+                        src_n += 1
+                    if prev_frame is None:
+                        break
+                    yield prev_frame
+                    frames_added += 1
+                    if pbar is not None:
+                        pbar.update_absolute(frames_added, int(yieldable_frames))
+            else:
+                # 降帧/直通：select 滤镜已选择帧，直接 yield
+                current_bytes = bytearray(bpi)
+                current_offset = 0
+                prev_frame = None
+                while True:
+                    bytes_read = proc.stdout.read(bpi - current_offset)
+                    if bytes_read is None:
+                        time.sleep(.05)
+                        continue
+                    if len(bytes_read) == 0:
+                        break
+                    current_bytes[current_offset:len(bytes_read)] = bytes_read
+                    current_offset += len(bytes_read)
+                    if current_offset == bpi:
+                        if prev_frame is not None:
+                            yield prev_frame
+                            frames_added += 1
+                            if pbar is not None:
+                                pbar.update_absolute(frames_added, int(yieldable_frames))
+                        prev_frame = np.frombuffer(current_bytes,
+                                                   dtype=np.dtype(np.uint16).newbyteorder("<")
+                                                   ).reshape(size[1], size[0], 4) / 65535.0
+                        if not alpha:
+                            prev_frame = prev_frame[:, :, :-1]
+                        current_offset = 0
+                if prev_frame is not None:
+                    yield prev_frame
+                    frames_added += 1
+                    if pbar is not None:
+                        pbar.update_absolute(frames_added, int(yieldable_frames))
+    except BrokenPipeError:
+        try:
+            err = proc.stderr.read().decode(*ENCODE_ARGS)
+        except Exception:
+            err = ""
+        raise Exception("FFmpeg read error:\n" + err)
+
+
+class MKVideoLoader:
+    """
+    MK-视频加载节点
+    使用 FFmpeg 解码视频为帧序列，支持上传文件、选择输入目录视频
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        files = []
+        try:
+            if os.path.isdir(input_dir):
+                for f in os.listdir(input_dir):
+                    fp = os.path.join(input_dir, f)
+                    if os.path.isfile(fp):
+                        ext = os.path.splitext(f)[1].lower().lstrip('.')
+                        if ext in VIDEO_EXTENSIONS:
+                            files.append(f)
+        except Exception:
+            pass
+        return {
+            "required": {
+                "视频": (sorted(files),),
+                "强制帧率": ("FLOAT", {"default": 0, "min": 0, "max": 240, "step": 0.001}),
+                "视频比例": (["自定义比例", "原始比例", "竖屏9:16", "竖屏3:4", "横屏16:9", "横屏4:3", "等比1:1"], {"default": "自定义比例"}),
+                "自定义宽度": ("INT", {"default": 0, "min": 0, "max": DIMMAX, "step": 8}),
+                "自定义高度": ("INT", {"default": 0, "min": 0, "max": DIMMAX, "step": 8}),
+                "跳过帧数": ("INT", {"default": 0, "min": 0, "max": BIGMAX, "step": 1}),
+                "帧数上限": ("INT", {"default": 0, "min": 0, "max": BIGMAX, "step": 1}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "AUDIO", "VHS_VIDEOINFO")
+    RETURN_NAMES = ("图像", "音频", "视频信息")
+    FUNCTION = "load_video"
+    CATEGORY = "MK_Tools"
+    OUTPUT_NODE = True
+
+    def load_video(self, 视频, 强制帧率=0, 视频比例="原始比例", 自定义宽度=0, 自定义高度=0,
+                   帧数上限=0, 跳过帧数=0, unique_id=None):
+        强制帧率 = int(强制帧率)
+        video_path = folder_paths.get_annotated_filepath(视频)
+        if not video_path or not os.path.isfile(video_path):
+            raise ValueError(f"Invalid video file: {视频}")
+
+        downscale_ratio = 8
+
+        # 非自定义比例时：自定义宽度作为计算方式(1=长边/2=短边/3=宽度/4=高度)，自定义高度作为边长尺寸
+        if 视频比例 != "自定义比例":
+            ratio_mode = max(1, min(4, int(自定义宽度 or 1)))
+            ratio_dim = max(0, int(自定义高度 or 0))
+            cw, ch = 0, 0  # 由比例逻辑接管
+        else:
+            ratio_mode = 1
+            ratio_dim = 0
+            cw, ch = 自定义宽度, 自定义高度
+
+        gen = ffmpeg_frame_generator(
+            video=video_path,
+            force_rate=强制帧率,
+            frame_load_cap=帧数上限,
+            skip_frames=跳过帧数,
+            custom_width=cw,
+            custom_height=ch,
+            downscale_ratio=downscale_ratio,
+            aspect_ratio=视频比例,
+            ratio_mode=ratio_mode,
+            ratio_dim=ratio_dim,
+        )
+
+        info = next(gen)
+        (src_w, src_h, src_fps, src_dur, src_frames,
+         target_frame_time, yieldable, new_w, new_h, alpha) = info
+
+        frames = []
+        try:
+            for frame in gen:
+                frames.append(frame)
+        except StopIteration:
+            pass
+
+        if not frames:
+            raise RuntimeError("No frames decoded from video")
+
+        channels = 4 if alpha else 3
+        image_tensor = torch.from_numpy(
+            np.stack(frames).astype(np.float32)
+        ).view(-1, new_h, new_w, channels)
+
+        loaded_fps = 1.0 / target_frame_time if target_frame_time > 0 else src_fps
+        loaded_count = image_tensor.shape[0]
+        loaded_duration = loaded_count * target_frame_time
+
+        audio_start = 跳过帧数 / src_fps if src_fps > 0 else 0.0
+        audio_duration = loaded_duration if loaded_duration > 0 else None
+        waveform, sr = extract_audio(
+            video_path,
+            start_time=audio_start,
+            duration=audio_duration,
+            sample_rate=AUDIO_SAMPLE_RATE,
+        )
+        if waveform is None or waveform.numel() == 0:
+            audio_samples = max(int(AUDIO_SAMPLE_RATE * loaded_duration), 1)
+            audio = {
+                "waveform": torch.zeros(1, 2, audio_samples, dtype=torch.float32),
+                "sample_rate": AUDIO_SAMPLE_RATE,
+            }
+        else:
+            expected_samples = max(int(AUDIO_SAMPLE_RATE * loaded_duration), 1)
+            actual_samples = waveform.shape[-1]
+            if actual_samples > expected_samples:
+                waveform = waveform[..., :expected_samples]
+            elif actual_samples < expected_samples:
+                pad = expected_samples - actual_samples
+                waveform = torch.nn.functional.pad(waveform, (0, pad))
+            audio = {
+                "waveform": waveform.unsqueeze(0),
+                "sample_rate": AUDIO_SAMPLE_RATE,
+            }
+
+        video_info = {
+            "source_fps": src_fps,
+            "source_frame_count": src_frames,
+            "source_duration": src_dur,
+            "source_width": src_w,
+            "source_height": src_h,
+            "loaded_fps": loaded_fps,
+            "loaded_frame_count": loaded_count,
+            "loaded_duration": loaded_duration,
+            "loaded_width": new_w,
+            "loaded_height": new_h,
+            "skip_frames": max(0, int(跳过帧数 or 0)),
+            "filename": 视频,
+        }
+
+        # 生成预览视频
+        preview_ui = {}
+        try:
+            temp_dir = folder_paths.get_temp_directory()
+            preview_filename = f"mk_preview_{unique_id or 'node'}_{int(time.time() * 1000)}.mp4"
+            preview_path = os.path.join(temp_dir, preview_filename)
+
+            # 构建 vf 滤镜
+            src_ar = src_w / src_h if src_h > 0 else 1.0
+            dst_ar = new_w / new_h if new_h > 0 else 1.0
+            vf_parts = []
+            if new_w != src_w or new_h != src_h:
+                if abs(src_ar - dst_ar) < 0.01:
+                    vf_parts.append(f"scale={new_w}:{new_h}")
+                else:
+                    vf_parts.append(f"scale={new_w}:{new_h}:force_original_aspect_ratio=increase")
+                    vf_parts.append(f"crop={new_w}:{new_h}")
+                vf_parts.append("setsar=1")
+            # 帧率滤镜
+            fr_filters, _is_upscale = _build_framerate_filters(强制帧率, src_fps)
+            if _is_upscale:
+                fr_filters = [f"fps=fps={强制帧率}:round=down"]
+            if fr_filters:
+                vf_parts = fr_filters + vf_parts
+
+            cmd = [ffmpeg_path, "-y", "-v", "error"]
+            # 起始时间
+            start_time = 跳过帧数 / src_fps if src_fps > 0 else 0.0
+            if start_time > 0:
+                if start_time > 4:
+                    cmd += ["-ss", str(start_time - 4), "-i", video_path, "-ss", "4"]
+                else:
+                    cmd += ["-ss", str(start_time), "-i", video_path]
+            else:
+                cmd += ["-i", video_path]
+
+            if 强制帧率 > 0:
+                cmd += ["-r", str(强制帧率)]
+
+            if vf_parts:
+                cmd += ["-vf", ",".join(vf_parts)]
+
+            if 帧数上限 > 0:
+                cmd += ["-frames:v", str(帧数上限)]
+
+            if loaded_duration > 0:
+                cmd += ["-t", str(loaded_duration)]
+
+            cmd += ["-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "128k",
+                    preview_path]
+
+            proc = subprocess.run(cmd, capture_output=True, timeout=120)
+            if proc.returncode != 0:
+                err = proc.stderr.decode(*ENCODE_ARGS)
+                print(f"[MK-视频加载] 预览视频转码失败 (rc={proc.returncode}): {err[:500]}")
+            elif os.path.isfile(preview_path):
+                preview_ui = {
+                    "video_preview": [{
+                        "filename": preview_filename,
+                        "subfolder": "",
+                        "type": "temp",
+                    }]
+                }
+        except Exception as e:
+            print(f"[MK-视频加载] 预览视频生成异常: {e}")
+
+        if image_tensor.size(3) == 4:
+            rgb = image_tensor[:, :, :, :3]
+            result = (rgb, audio, video_info)
+        else:
+            result = (image_tensor, audio, video_info)
+
+        return {"result": result, "ui": preview_ui}
+
+    @classmethod
+    def IS_CHANGED(cls, 视频, 强制帧率=0, 视频比例="原始比例", 自定义宽度=0, 自定义高度=0,
+                   帧数上限=0, 跳过帧数=0, **kwargs):
+        try:
+            path = folder_paths.get_annotated_filepath(视频)
+            file_hash = calculate_file_hash(path)
+        except Exception:
+            file_hash = "0"
+        return f"{file_hash}|{强制帧率}|{视频比例}|{自定义宽度}|{自定义高度}|{帧数上限}|{跳过帧数}"
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, 视频, **kwargs):
+        if not folder_paths.exists_annotated_filepath(视频):
+            return f"Invalid video file: {视频}"
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 分块上传支持（并发 + 断点续传 + 1GB 限制）
+# ═══════════════════════════════════════════════════════════════════════════
+import uuid as _mk_uuid
+import threading as _mk_threading
+import time as _mk_time
+
+from server import PromptServer as _mk_PS
+from aiohttp import web as _mk_web
+
+# 路由安全装饰器
+import functools as _mk_ft
+import traceback as _mk_tb
+
+def _mk_safe_handler(fn):
+    def _fmt(exc, status=500):
+        tb_s = ''.join(_mk_tb.format_exception(type(exc), exc, exc.__traceback__))
+        try:
+            return _mk_web.json_response(
+                {'error': '%s: %s' % (type(exc).__name__, exc), 'traceback': tb_s}, status=status)
+        except Exception:
+            return _mk_web.Response(status=500, text='%s: %s\n\n%s' % (type(exc).__name__, exc, tb_s))
+    if hasattr(fn, '__call__'):
+        import asyncio as _mk_aio
+        if _mk_aio.iscoroutinefunction(fn):
+            @_mk_ft.wraps(fn)
+            async def _aw(*a, **kw):
+                try:
+                    return await fn(*a, **kw)
+                except _mk_web.HTTPException:
+                    raise
+                except BaseException as e:
+                    print('[MK-视频加载路由异常] %s: %s: %s' % (fn.__name__, type(e).__name__, e))
+                    _mk_tb.print_exc()
+                    return _fmt(e)
+            return _aw
+        @_mk_ft.wraps(fn)
+        def _sw(*a, **kw):
+            try:
+                return fn(*a, **kw)
+            except _mk_web.HTTPException:
+                raise
+            except BaseException as e:
+                print('[MK-视频加载路由异常] %s: %s: %s' % (fn.__name__, type(e).__name__, e))
+                _mk_tb.print_exc()
+                return _fmt(e)
+        return _sw
+    return fn
+
+# 上传会话存储
+_mk_video_sessions = {}
+_mk_video_sessions_lock = _mk_threading.Lock()
+_MK_VIDEO_MAX_SIZE = 1024 * 1024 * 1024  # 1GB
+_MK_VIDEO_SESSION_TIMEOUT = 3600  # 会话超时 1 小时
+
+
+def _mk_secure_video_filename(name, upload_dir=None):
+    """生成安全的文件名，防止路径穿越。重名时加序号后缀"""
+    import re as _re
+    name = os.path.basename(name)
+    name = _re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
+    name = name.strip().strip('.')
+    if not name:
+        name = 'video.mp4'
+    if upload_dir is None:
+        upload_dir = folder_paths.get_input_directory()
+    base, ext = os.path.splitext(name)
+    final_name = name
+    seq = 1
+    while os.path.exists(os.path.join(upload_dir, final_name)):
+        final_name = f"{base}_{seq}{ext}"
+        seq += 1
+    return final_name
+
+
+def _mk_secure_subfolder(subfolder):
+    """安全过滤 subfolder"""
+    if not subfolder:
+        return ""
+    import re as _re
+    parts = []
+    for p in subfolder.replace("\\", "/").split("/"):
+        p = _re.sub(r'[^\w.\-]', '_', p)
+        if p in ("", ".", ".."):
+            continue
+        parts.append(p)
+    return "/".join(parts)
+
+
+def _mk_cleanup_video_sessions():
+    """清理超时的上传会话"""
+    now = _mk_time.time()
+    with _mk_video_sessions_lock:
+        expired = [sid for sid, s in _mk_video_sessions.items()
+                   if now - s.get('last_activity', 0) > _MK_VIDEO_SESSION_TIMEOUT]
+        for sid in expired:
+            session = _mk_video_sessions.pop(sid, None)
+            if session and not session.get('done'):
+                try:
+                    if os.path.exists(session['file_path']):
+                        os.remove(session['file_path'])
+                except Exception:
+                    pass
+
+
+# HEVC → H.264 兜底转码
+MK_LOADER_H264_SUBDIR = "mk-h264"
+WEBCODECS_DECODABLE = {"h264", "vp8", "vp9", "av1", "mpeg4", "avc1"}
+AUDIOCODECS_DECODABLE = {"aac", "mp4a", "opus", "flac", "vorbis", "pcm"}
+
+
+def _mk_loader_abs(filename, file_type="input", subfolder=""):
+    """把文件名解析为绝对路径"""
+    base = folder_paths.get_temp_directory() if file_type == "temp" else folder_paths.get_input_directory()
+    rel = []
+    if subfolder:
+        sf = _mk_secure_subfolder(subfolder)
+        if sf:
+            rel.append(sf)
+    rel.append(filename or "")
+    return os.path.join(base, *rel)
+
+
+def _mk_detect_stream_codecs(filename, file_type="input", subfolder=""):
+    """用 ffmpeg -i 探测视频流与音频流编码名"""
+    video_path = _mk_loader_abs(filename, file_type, subfolder)
+    if not os.path.isfile(video_path):
+        return None, None
+    try:
+        proc = subprocess.run([ffmpeg_path, "-i", video_path],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                              timeout=15, check=False)
+    except Exception:
+        return None, None
+    vcodec = acodec = None
+    for line in proc.stderr.decode(*ENCODE_ARGS).split('\n'):
+        m = re.search(r"Stream #.*Video: (\w+)", line)
+        if m and vcodec is None:
+            vcodec = m.group(1).lower()
+        m = re.search(r"Stream #.*Audio: (\w+)", line)
+        if m and acodec is None:
+            acodec = m.group(1).lower()
+    return vcodec, acodec
+
+
+def ensure_h264_for_loader(filename, file_type="input", subfolder="", force=False):
+    """懒触发兜底：若视频或音轨是 WebCodecs 解不了的编码，转成 H.264+AAC"""
+    try:
+        codec, audio_codec = _mk_detect_stream_codecs(filename, file_type, subfolder)
+    except Exception:
+        codec = audio_codec = None
+    video_ok = (codec is None) or (codec in WEBCODECS_DECODABLE)
+    audio_ok = (audio_codec is None) or (audio_codec in AUDIOCODECS_DECODABLE)
+
+    if not force and video_ok and audio_ok:
+        return {"transcoded": False, "filename": filename, "subfolder": subfolder or "",
+                "type": file_type, "codec": codec, "audio_codec": audio_codec, "transcoding": False}
+
+    video_path = _mk_loader_abs(filename, file_type, subfolder)
+    if not os.path.isfile(video_path):
+        return {"transcoded": False, "filename": filename, "subfolder": subfolder or "",
+                "type": file_type, "codec": codec, "audio_codec": audio_codec, "transcoding": False}
+
+    # 生成转码缓存键
+    try:
+        h = hashlib.md5(
+            f"{video_path}|{os.path.getsize(video_path)}|{os.path.getmtime(video_path)}".encode("utf-8")
+        ).hexdigest()[:10]
+    except Exception:
+        h = hashlib.md5(video_path.encode("utf-8")).hexdigest()[:10]
+    base = os.path.splitext(os.path.basename(filename))[0]
+    out_name = f"{base}_{h}_h264.mp4"
+    out_rel = f"{MK_LOADER_H264_SUBDIR}/{out_name}"
+    out_abs = os.path.join(folder_paths.get_input_directory(), MK_LOADER_H264_SUBDIR, out_name)
+    os.makedirs(os.path.dirname(out_abs), exist_ok=True)
+
+    # 缓存已存在
+    if os.path.isfile(out_abs):
+        return {"transcoded": True, "filename": out_rel, "subfolder": MK_LOADER_H264_SUBDIR,
+                "type": "input", "codec": codec, "audio_codec": audio_codec, "transcoding": True}
+
+    cmd = [ffmpeg_path, "-y", "-v", "error",
+           "-i", video_path,
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+           "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+           "-c:a", "aac", "-ar", "44100", "-ac", "2", out_abs]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=1800)
+        if proc.returncode != 0:
+            err = proc.stderr.decode(*ENCODE_ARGS)
+            print(f"[MK-视频加载] H.264 转码失败: {filename}: {err[:300]}")
+            return {"transcoded": False, "filename": filename, "subfolder": subfolder or "",
+                    "type": file_type, "codec": codec, "audio_codec": audio_codec, "transcoding": False}
+    except Exception as e:
+        print(f"[MK-视频加载] H.264 转码异常: {filename}: {e}")
+        return {"transcoded": False, "filename": filename, "subfolder": subfolder or "",
+                "type": file_type, "codec": codec, "audio_codec": audio_codec, "transcoding": False}
+    if not os.path.isfile(out_abs):
+        return {"transcoded": False, "filename": filename, "subfolder": subfolder or "",
+                "type": file_type, "codec": codec, "audio_codec": audio_codec, "transcoding": False}
+
+    return {"transcoded": True, "filename": out_rel, "subfolder": MK_LOADER_H264_SUBDIR,
+            "type": "input", "codec": codec, "audio_codec": audio_codec, "transcoding": True}
+
+
+if getattr(_mk_PS, 'instance', None) is not None:
+
+    @_mk_PS.instance.routes.post("/mk/video_ensure_h264")
+    @_mk_safe_handler
+    async def mk_video_ensure_h264(request):
+        """视频加载器解码源兜底"""
+        data = await request.json()
+        filename = data.get("filename", "")
+        file_type = data.get("type", "input")
+        subfolder = data.get("subfolder", "")
+        force = bool(data.get("force", False))
+        if not filename:
+            return _mk_web.json_response({"error": "filename required"}, status=400)
+        result = ensure_h264_for_loader(filename, file_type, subfolder, force=force)
+        return _mk_web.json_response(result)
+
+    @_mk_PS.instance.routes.post("/mk/video_upload_start")
+    @_mk_safe_handler
+    async def mk_video_upload_start(request):
+        """启动分块上传会话"""
+        data = await request.json()
+        filename = data.get("filename", "")
+        total_size = int(data.get("total_size", 0))
+        total_chunks = int(data.get("total_chunks", 0))
+        subfolder = _mk_secure_subfolder(data.get("subfolder", ""))
+
+        if not filename or total_size <= 0 or total_chunks <= 0:
+            return _mk_web.json_response({"error": "参数无效"}, status=400)
+
+        if total_size > _MK_VIDEO_MAX_SIZE:
+            return _mk_web.json_response({"error": "文件超过 1GB 限制"}, status=413)
+
+        _mk_cleanup_video_sessions()
+
+        upload_dir = folder_paths.get_input_directory()
+        if subfolder:
+            target_dir = os.path.join(upload_dir, *subfolder.split("/"))
+            os.makedirs(target_dir, exist_ok=True)
+            safe_name = _mk_secure_video_filename(filename, target_dir)
+        else:
+            target_dir = upload_dir
+            os.makedirs(target_dir, exist_ok=True)
+            safe_name = _mk_secure_video_filename(filename)
+        file_path = os.path.join(target_dir, safe_name)
+
+        # 预分配文件空间
+        with open(file_path, 'wb') as f:
+            f.truncate(total_size)
+
+        session_id = str(_mk_uuid.uuid4())
+        with _mk_video_sessions_lock:
+            _mk_video_sessions[session_id] = {
+                'filename': safe_name,
+                'subfolder': subfolder,
+                'file_path': file_path,
+                'total_size': total_size,
+                'total_chunks': total_chunks,
+                'received_chunks': set(),
+                'received_bytes': 0,
+                'created_at': _mk_time.time(),
+                'last_activity': _mk_time.time(),
+                'done': False,
+            }
+
+        full_name = f"{subfolder}/{safe_name}" if subfolder else safe_name
+        return _mk_web.json_response({
+            "session_id": session_id,
+            "filename": full_name,
+        })
+
+    @_mk_PS.instance.routes.post("/mk/video_upload_chunk")
+    @_mk_safe_handler
+    async def mk_video_upload_chunk(request):
+        """上传单个分块"""
+        post = await request.post()
+        session_id = post.get("session_id", "")
+        chunk_index = int(post.get("chunk_index", -1))
+        chunk_offset = int(post.get("chunk_offset", -1))
+        chunk_file = post.get("chunk")
+
+        if not session_id or chunk_index < 0 or chunk_offset < 0 or not chunk_file:
+            return _mk_web.json_response({"error": "参数无效"}, status=400)
+
+        with _mk_video_sessions_lock:
+            session = _mk_video_sessions.get(session_id)
+            if not session:
+                return _mk_web.json_response({"error": "会话不存在或已过期"}, status=404)
+            session['last_activity'] = _mk_time.time()
+
+            if chunk_index in session['received_chunks']:
+                return _mk_web.json_response({
+                    "status": "duplicate",
+                    "received": len(session['received_chunks']),
+                    "total": session['total_chunks'],
+                })
+
+            if chunk_index >= session['total_chunks']:
+                return _mk_web.json_response({"error": "分块索引越界"}, status=400)
+
+            file_path = session['file_path']
+            total_chunks = session['total_chunks']
+
+        chunk_data = chunk_file.file.read()
+        chunk_size = len(chunk_data)
+
+        with open(file_path, 'r+b') as f:
+            f.seek(chunk_offset)
+            f.write(chunk_data)
+
+        with _mk_video_sessions_lock:
+            session['received_chunks'].add(chunk_index)
+            session['received_bytes'] += chunk_size
+            received_count = len(session['received_chunks'])
+
+            if received_count >= total_chunks:
+                session['done'] = True
+                actual_size = 0
+                try:
+                    actual_size = os.path.getsize(file_path)
+                except Exception:
+                    pass
+                if actual_size != session['total_size']:
+                    try:
+                        os.remove(file_path)
+                    except Exception:
+                        pass
+                    return _mk_web.json_response({
+                        "error": f"文件大小不匹配 (预期 {session['total_size']}，实际 {actual_size})，已删除损坏文件",
+                    }, status=500)
+                return _mk_web.json_response({
+                    "status": "done",
+                    "filename": session['filename'],
+                    "received": received_count,
+                    "total": total_chunks,
+                })
+
+        return _mk_web.json_response({
+            "status": "ok",
+            "received": received_count,
+            "total": total_chunks,
+        })
+
+    @_mk_PS.instance.routes.get("/mk/video_upload_status")
+    @_mk_safe_handler
+    async def mk_video_upload_status(request):
+        """查询上传会话状态"""
+        session_id = request.query.get("session_id", "")
+        if not session_id:
+            return _mk_web.json_response({"error": "session_id required"}, status=400)
+
+        with _mk_video_sessions_lock:
+            session = _mk_video_sessions.get(session_id)
+            if not session:
+                return _mk_web.json_response({"error": "会话不存在或已过期"}, status=404)
+            return _mk_web.json_response({
+                "session_id": session_id,
+                "filename": session['filename'],
+                "total_size": session['total_size'],
+                "total_chunks": session['total_chunks'],
+                'received_chunks': sorted(session['received_chunks']),
+                "received_count": len(session['received_chunks']),
+                "done": session['done'],
+            })
+
+
+NODE_CLASS_MAPPINGS = {
+    "MKVideoLoader": MKVideoLoader
+}

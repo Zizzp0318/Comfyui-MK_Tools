@@ -10,6 +10,8 @@ from .nodes.simple_image_compare import NODE_CLASS_MAPPINGS as SIMPLE_IMAGE_COMP
 from .nodes.save_image import NODE_CLASS_MAPPINGS as SAVE_IMAGE_MAPPINGS
 from .nodes.audio_loader import NODE_CLASS_MAPPINGS as AUDIO_LOADER_MAPPINGS
 from .nodes.audio_save import NODE_CLASS_MAPPINGS as AUDIO_SAVE_MAPPINGS
+from .nodes.video_loader import NODE_CLASS_MAPPINGS as VIDEO_LOADER_MAPPINGS
+from .nodes.video_save import NODE_CLASS_MAPPINGS as VIDEO_SAVE_MAPPINGS
 
 # 合并所有节点映射
 NODE_CLASS_MAPPINGS = {
@@ -20,6 +22,8 @@ NODE_CLASS_MAPPINGS = {
     **SAVE_IMAGE_MAPPINGS,
     **AUDIO_LOADER_MAPPINGS,
     **AUDIO_SAVE_MAPPINGS,
+    **VIDEO_LOADER_MAPPINGS,
+    **VIDEO_SAVE_MAPPINGS,
 }
 
 # 节点显示名称映射
@@ -31,6 +35,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_SaveImage": "MK-图像保存",
     "MK_AudioLoader": "MK-音频加载",
     "MK_AudioSave": "MK-音频保存",
+    "MKVideoLoader": "MK-视频加载",
+    "MKVideoSave": "MK-视频保存",
 }
 
 # Web 目录
