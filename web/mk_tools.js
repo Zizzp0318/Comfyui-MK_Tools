@@ -706,3 +706,7 @@ app.registerExtension({
 });
 
 console.log("MK_Tools extension loaded successfully");
+
+// 导入其他节点的前端代码
+import "./seed.js";
+import "./any_switch.js";
