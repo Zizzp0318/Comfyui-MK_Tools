@@ -8,6 +8,7 @@ from .nodes.fill_holes import NODE_CLASS_MAPPINGS as FILL_HOLES_MAPPINGS
 from .nodes.prompt_concat import NODE_CLASS_MAPPINGS as PROMPT_CONCAT_MAPPINGS
 from .nodes.simple_image_compare import NODE_CLASS_MAPPINGS as SIMPLE_IMAGE_COMPARE_MAPPINGS
 from .nodes.save_image import NODE_CLASS_MAPPINGS as SAVE_IMAGE_MAPPINGS
+from .nodes.audio_loader import NODE_CLASS_MAPPINGS as AUDIO_LOADER_MAPPINGS
 
 # 合并所有节点映射
 NODE_CLASS_MAPPINGS = {
@@ -16,6 +17,7 @@ NODE_CLASS_MAPPINGS = {
     **PROMPT_CONCAT_MAPPINGS,
     **SIMPLE_IMAGE_COMPARE_MAPPINGS,
     **SAVE_IMAGE_MAPPINGS,
+    **AUDIO_LOADER_MAPPINGS,
 }
 
 # 节点显示名称映射
@@ -25,6 +27,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_PromptConcat": "MK-提示词拼接",
     "MK_SimpleImageCompare": "MK-简易图像对比",
     "MK_SaveImage": "MK-图像保存",
+    "MK_AudioLoader": "MK-音频加载",
 }
 
 # Web 目录
