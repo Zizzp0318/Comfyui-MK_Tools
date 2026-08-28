@@ -10,6 +10,7 @@ from .nodes.seed import NODE_CLASS_MAPPINGS as SEED_MAPPINGS
 from .nodes.lora_loader_stack import NODE_CLASS_MAPPINGS as LORA_LOADER_STACK_MAPPINGS
 from .nodes.prompt_concat import NODE_CLASS_MAPPINGS as PROMPT_CONCAT_MAPPINGS
 from .nodes.simple_image_compare import NODE_CLASS_MAPPINGS as SIMPLE_IMAGE_COMPARE_MAPPINGS
+from .nodes.save_image import NODE_CLASS_MAPPINGS as SAVE_IMAGE_MAPPINGS
 
 # 合并所有节点映射
 NODE_CLASS_MAPPINGS = {
@@ -20,6 +21,7 @@ NODE_CLASS_MAPPINGS = {
     **LORA_LOADER_STACK_MAPPINGS,
     **PROMPT_CONCAT_MAPPINGS,
     **SIMPLE_IMAGE_COMPARE_MAPPINGS,
+    **SAVE_IMAGE_MAPPINGS,
 }
 
 # 节点显示名称映射
@@ -31,6 +33,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_LoraLoaderStack": "MK-Lora堆加载",
     "MK_PromptConcat": "MK-提示词拼接",
     "MK_SimpleImageCompare": "MK-简易图像对比",
+    "MK_SaveImage": "MK-图像保存",
 }
 
 # Web 目录
