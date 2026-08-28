@@ -15,8 +15,8 @@ app.registerExtension({
 
                 this.nodeType = null;
 
-                // 初始添加 5 个输入
-                this.addAnyInput(5);
+                // 初始添加 2 个输入
+                this.addAnyInput(2);
 
                 return result;
             };
@@ -52,8 +52,8 @@ app.registerExtension({
 
             // 稳定输入/输出
             nodeType.prototype.stabilize = function() {
-                // 移除末尾未使用的输入（保留至少 4 个）
-                while (this.inputs.length > 4) {
+                // 移除末尾未使用的输入（保留至少 2 个）
+                while (this.inputs.length > 2) {
                     const lastInput = this.inputs[this.inputs.length - 1];
                     if (!lastInput.link) {
                         this.removeInput(this.inputs.length - 1);
@@ -62,8 +62,11 @@ app.registerExtension({
                     }
                 }
 
-                // 添加一个新的空输入
-                this.addAnyInput(1);
+                // 只有当最后一个输入被连接时，才添加新的空输入
+                const lastInput = this.inputs[this.inputs.length - 1];
+                if (lastInput && lastInput.link) {
+                    this.addAnyInput(1);
+                }
 
                 // 检测连接的类型
                 let connectedType = this.detectConnectedType();
