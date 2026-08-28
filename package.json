@@ -1,0 +1,26 @@
+{
+  "name": "ComfyUI-MK_Tools",
+  "version": "1.0.0",
+  "description": "Image Selection and Fill Holes nodes for ComfyUI",
+  "main": "__init__.py",
+  "nodes": [
+    {
+      "class": "MK_ImageSelection",
+      "display_name": "MK Image Selection (图像选择)",
+      "category": "MK_Tools/Image"
+    },
+    {
+      "class": "MK_FillHoles",
+      "display_name": "MK Fill Holes (填充空洞)",
+      "category": "MK_Tools/Image"
+    }
+  ],
+  "web_extensions": [
+    "web/mk_tools.js"
+  ],
+  "dependencies": {
+    "scipy": ">=1.9.0",
+    "numpy": ">=1.23.0",
+    "torch": ">=2.0.0"
+  }
+}
