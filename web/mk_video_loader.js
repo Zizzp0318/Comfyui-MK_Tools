@@ -321,7 +321,17 @@ app.registerExtension({
                                 }
                             }
 
-                            const url = `/view?filename=${encodeURIComponent(finalPath)}&type=input`;
+                            // 构建正确的视频URL，处理子文件夹路径
+                            let url;
+                            if (finalPath.includes('/')) {
+                                // 如果路径包含子文件夹（如 mk-h264/xxx.mp4），需要特殊处理
+                                const parts = finalPath.split('/');
+                                const subfolder = parts.slice(0, -1).join('/');
+                                const filename = parts[parts.length - 1];
+                                url = `/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=input`;
+                            } else {
+                                url = `/view?filename=${encodeURIComponent(finalPath)}&type=input`;
+                            }
                             player.load(url);
 
                             node.setDirtyCanvas?.(true, true);
