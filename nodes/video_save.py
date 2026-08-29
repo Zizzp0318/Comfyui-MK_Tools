@@ -357,7 +357,7 @@ class MKVideoSave:
                 "文件名前缀": ("STRING", {"default": "mk_video"}),
                 "格式": (["mp4", "webm", "gif"], {"default": "mp4"}),
                 "CRF": ("INT", {"default": 19, "min": 0, "max": 51, "step": 1}),
-                "模式": (["保存", "预览"], {"default": "保存"}),
+                "保存到output": ("BOOLEAN", {"default": True}),
                 "保存元数据": ("BOOLEAN", {"default": True}),
             },
             "optional": {
@@ -377,12 +377,12 @@ class MKVideoSave:
     OUTPUT_NODE = True
 
     def combine_video(self, 图像, 帧率, 文件名前缀, 格式, CRF,
-                      模式, 保存元数据, 音频=None,
+                      保存到output, 保存元数据, 音频=None,
                       prompt=None, extra_pnginfo=None, unique_id=None):
         if not isinstance(图像, torch.Tensor) or 图像.size(0) == 0:
             return ()
 
-        base_dir = (_safe_dir('get_output_directory', 'output') if 模式 == "保存"
+        base_dir = (_safe_dir('get_output_directory', 'output') if 保存到output
                     else _safe_dir('get_temp_directory',   'temp'))
 
         output_dir = base_dir
@@ -423,7 +423,7 @@ class MKVideoSave:
                 "videos": [{
                     "filename": file,
                     "subfolder": subfolder,
-                    "type": "output" if 模式 == "保存" else "temp",
+                    "type": "output" if 保存到output else "temp",
                     "format": 格式,
                     "frame_rate": 帧率,
                 }],
