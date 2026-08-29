@@ -417,6 +417,23 @@ class MKVideoSave:
             audio=音频,
         )
 
+        # 保存元数据到 JSON 文件
+        if 保存元数据 and 保存到output:
+            metadata = {}
+            if prompt is not None:
+                metadata["prompt"] = prompt
+            if extra_pnginfo is not None:
+                metadata.update(extra_pnginfo)
+
+            if metadata:
+                json_file = f"{filename}_{counter:05}.json"
+                json_path = os.path.join(full_output_folder, json_file)
+                try:
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(metadata, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    print(f"[MK-视频保存] 保存元数据失败: {e}")
+
         ui = {
             "result": (),
             "ui": {
