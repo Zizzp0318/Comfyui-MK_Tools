@@ -18,49 +18,39 @@ class MK_ImageCrop:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
-                "width": ("INT", {
+                "图像": ("IMAGE",),
+                "宽度": ("INT", {
                     "default": 256,
                     "min": 0,
                     "max": MAX_RESOLUTION,
                     "step": 8,
-                    "display": "number",
-                    "cn_name": "宽度",
                 }),
-                "height": ("INT", {
+                "高度": ("INT", {
                     "default": 256,
                     "min": 0,
                     "max": MAX_RESOLUTION,
                     "step": 8,
-                    "display": "number",
-                    "cn_name": "高度",
                 }),
-                "position": ([
-                    "top-left",
-                    "top-center",
-                    "top-right",
-                    "right-center",
-                    "bottom-right",
-                    "bottom-center",
-                    "bottom-left",
-                    "left-center",
-                    "center"
-                ], {
-                    "cn_name": "位置",
-                }),
-                "x_offset": ("INT", {
+                "位置": ([
+                    "左上角",
+                    "上方居中",
+                    "右上角",
+                    "右侧居中",
+                    "右下角",
+                    "下方居中",
+                    "左下角",
+                    "左侧居中",
+                    "居中"
+                ],),
+                "X轴偏移": ("INT", {
                     "default": 0,
                     "min": -99999,
                     "step": 1,
-                    "display": "number",
-                    "cn_name": "X轴偏移",
                 }),
-                "y_offset": ("INT", {
+                "Y轴偏移": ("INT", {
                     "default": 0,
                     "min": -99999,
                     "step": 1,
-                    "display": "number",
-                    "cn_name": "Y轴偏移",
                 }),
             }
         }
@@ -70,30 +60,45 @@ class MK_ImageCrop:
     FUNCTION = "execute"
     CATEGORY = "MK_Tools/image"
 
-    def execute(self, image, width, height, position, x_offset, y_offset):
+    def execute(self, 图像, 宽度, 高度, 位置, X轴偏移, Y轴偏移):
         """
         执行图像裁剪
 
         参数:
-            image: 输入图像张量 (batch, height, width, channels)
-            width: 裁剪宽度
-            height: 裁剪高度
-            position: 裁剪位置
-            x_offset: X轴偏移量
-            y_offset: Y轴偏移量
+            图像: 输入图像张量 (batch, height, width, channels)
+            宽度: 裁剪宽度
+            高度: 裁剪高度
+            位置: 裁剪位置
+            X轴偏移: X轴偏移量
+            Y轴偏移: Y轴偏移量
 
         返回:
             裁剪后的图像, x坐标, y坐标
         """
-        _, oh, ow, _ = image.shape
+        _, oh, ow, _ = 图像.shape
 
         # 确保裁剪尺寸不超过原图尺寸
-        width = min(ow, width)
-        height = min(oh, height)
+        width = min(ow, 宽度)
+        height = min(oh, 高度)
 
         # 根据位置计算裁剪起始坐标
         x = 0
         y = 0
+
+        # 位置映射
+        position_map = {
+            "左上角": "top-left",
+            "上方居中": "top-center",
+            "右上角": "top-right",
+            "右侧居中": "right-center",
+            "右下角": "bottom-right",
+            "下方居中": "bottom-center",
+            "左下角": "bottom-left",
+            "左侧居中": "left-center",
+            "居中": "center"
+        }
+
+        position = position_map.get(位置, 位置)
 
         if "center" in position:
             x = round((ow - width) / 2)
@@ -108,8 +113,8 @@ class MK_ImageCrop:
             x = ow - width
 
         # 应用偏移量
-        x += x_offset
-        y += y_offset
+        x += X轴偏移
+        y += Y轴偏移
 
         # 计算裁剪结束坐标
         x2 = x + width
@@ -126,7 +131,7 @@ class MK_ImageCrop:
             y = 0
 
         # 执行裁剪
-        image = image[:, y:y2, x:x2, :]
+        image = 图像[:, y:y2, x:x2, :]
 
         return (image, x, y,)
 
