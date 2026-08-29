@@ -23,6 +23,21 @@
 
 ---
 
+#### MK-图像裁剪 (MK Image Crop)
+精确裁剪图像的指定区域，支持多种定位方式和偏移调整。
+
+**功能特点：**
+- 9 种预设裁剪位置（左上、居中、右下等）
+- 精确的 X/Y 轴偏移控制
+- 自动边界检查和调整
+- 返回实际裁剪坐标
+- 支持批量图像处理
+- 智能尺寸适配（不超过原图）
+
+**来源：** [ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials)
+
+---
+
 #### MK-简易图像对比 (MK Simple Image Compare)
 通过滑动对比两张图像的差异。
 
@@ -224,6 +239,7 @@ Comyui-MK_Tools/
 ├── __init__.py                      # 插件入口
 ├── nodes/                           # 节点实现
 │   ├── image_selection.py           # 图像选择器
+│   ├── image_crop.py                # 图像裁剪
 │   ├── fill_holes.py                # 填充空洞
 │   ├── any_switch.py                # 任意切换
 │   ├── seed.py                      # 随机种子
@@ -233,7 +249,8 @@ Comyui-MK_Tools/
 │   ├── save_image.py                # 图像保存
 │   ├── audio_loader.py              # 音频加载
 │   ├── audio_save.py                # 音频保存
-│   └── video_loader.py              # 视频加载
+│   ├── video_loader.py              # 视频加载
+│   └── video_save.py                # 视频保存
 ├── web/                             # 前端代码
 │   ├── mk_tools.js                  # 入口
 │   ├── seed.js                      # 随机种子前端
@@ -242,7 +259,10 @@ Comyui-MK_Tools/
 │   ├── simple_image_compare.js      # 图像对比前端
 │   ├── mk_audio_loader.js           # 音频加载前端
 │   ├── mk_audio_save.js             # 音频保存前端
-│   └── mk_video_loader.js           # 视频加载前端
+│   ├── mk_video_loader.js           # 视频加载前端
+│   └── mk_video_save.js             # 视频保存前端
+├── docs/                            # 文档
+│   └── image_crop.md                # 图像裁剪文档
 ├── requirements.txt                 # Python 依赖
 └── README.md                        # 本文档
 ```
@@ -360,6 +380,7 @@ Comyui-MK_Tools/
 - [AlekPet/ComfyUI-Danbooru-Gallery](https://github.com/AlekPet/ComfyUI-Danbooru-Gallery) - 简易图像对比
 - [GentlemanHu/ComfyUI-ZXXNodes](https://github.com/GentlemanHu/ComfyUI-ZXXNodes) - 图像保存
 - [xiaozhuai/ComfyUI-xiaozhuguang](https://github.com/xiaozhuai/ComfyUI-xiaozhuguang) - 音频加载、音频保存、视频加载
+- [cubiq/ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials) - 图像裁剪
 
 感谢所有原作者的贡献！
 

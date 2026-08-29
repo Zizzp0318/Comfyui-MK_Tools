@@ -12,6 +12,7 @@ from .nodes.audio_loader import NODE_CLASS_MAPPINGS as AUDIO_LOADER_MAPPINGS
 from .nodes.audio_save import NODE_CLASS_MAPPINGS as AUDIO_SAVE_MAPPINGS
 from .nodes.video_loader import NODE_CLASS_MAPPINGS as VIDEO_LOADER_MAPPINGS
 from .nodes.video_save import NODE_CLASS_MAPPINGS as VIDEO_SAVE_MAPPINGS
+from .nodes.image_crop import NODE_CLASS_MAPPINGS as IMAGE_CROP_MAPPINGS
 
 # 合并所有节点映射
 NODE_CLASS_MAPPINGS = {
@@ -24,6 +25,7 @@ NODE_CLASS_MAPPINGS = {
     **AUDIO_SAVE_MAPPINGS,
     **VIDEO_LOADER_MAPPINGS,
     **VIDEO_SAVE_MAPPINGS,
+    **IMAGE_CROP_MAPPINGS,
 }
 
 # 节点显示名称映射
@@ -37,6 +39,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_AudioSave": "MK-音频保存",
     "MKVideoLoader": "MK-视频加载",
     "MKVideoSave": "MK-视频保存",
+    "MK_ImageCrop": "MK-图像裁剪",
 }
 
 # Web 目录
