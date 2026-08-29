@@ -17,10 +17,11 @@ const MAX_VIDEO_SIZE = 1024 * 1024 * 1024; // 1GB
 const MAX_CONCURRENT_CHUNKS = 3;
 const MAX_RETRIES = 3;
 
-async function _mkUploadChunk(uploadId, chunkIndex, blob, retryCount = 0) {
+async function _mkUploadChunk(sessionId, chunkIndex, chunkOffset, blob, retryCount = 0) {
     const formData = new FormData();
-    formData.append("upload_id", uploadId);
+    formData.append("session_id", sessionId);
     formData.append("chunk_index", String(chunkIndex));
+    formData.append("chunk_offset", String(chunkOffset));
     formData.append("chunk", blob);
 
     try {
@@ -36,14 +37,14 @@ async function _mkUploadChunk(uploadId, chunkIndex, blob, retryCount = 0) {
         if (retryCount < MAX_RETRIES) {
             console.log(`[MK-视频加载] 分片 ${chunkIndex} 上传失败，重试 ${retryCount + 1}/${MAX_RETRIES}:`, error);
             await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-            return _mkUploadChunk(uploadId, chunkIndex, blob, retryCount + 1);
+            return _mkUploadChunk(sessionId, chunkIndex, chunkOffset, blob, retryCount + 1);
         } else {
             throw new Error(`分片 ${chunkIndex} 上传失败: ${error.message}`);
         }
     }
 }
 
-async function _mkUploadAllChunks(uploadId, file, onProgress) {
+async function _mkUploadAllChunks(sessionId, file, onProgress) {
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const results = new Array(totalChunks);
     let completedChunks = 0;
@@ -65,7 +66,7 @@ async function _mkUploadAllChunks(uploadId, file, onProgress) {
                 const blob = file.slice(start, end);
 
                 try {
-                    const result = await _mkUploadChunk(uploadId, chunkIndex, blob);
+                    const result = await _mkUploadChunk(sessionId, chunkIndex, start, blob);
                     results[chunkIndex] = result;
                     completedChunks++;
                     if (onProgress) {
@@ -87,12 +88,15 @@ async function uploadVideoFile(file, onProgress) {
         throw new Error(`视频文件大小超过限制 (${(MAX_VIDEO_SIZE / (1024 * 1024 * 1024)).toFixed(1)}GB)`);
     }
 
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
     const startResponse = await fetch("/mk/video_upload_start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             filename: file.name,
             total_size: file.size,
+            total_chunks: totalChunks,
         }),
     });
 
@@ -101,21 +105,21 @@ async function uploadVideoFile(file, onProgress) {
     }
 
     const startData = await startResponse.json();
-    const uploadId = startData.upload_id;
+    const sessionId = startData.session_id;
 
-    await _mkUploadAllChunks(uploadId, file, onProgress);
+    await _mkUploadAllChunks(sessionId, file, onProgress);
 
-    const statusResponse = await fetch(`/mk/video_upload_status?upload_id=${uploadId}`);
+    const statusResponse = await fetch(`/mk/video_upload_status?session_id=${sessionId}`);
     if (!statusResponse.ok) {
         throw new Error(`检查上传状态失败: ${statusResponse.status}`);
     }
 
     const statusData = await statusResponse.json();
-    if (statusData.status !== "completed") {
+    if (!statusData.done) {
         throw new Error("上传未完成");
     }
 
-    return statusData.video_path;
+    return statusData.filename;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
