@@ -358,6 +358,7 @@ class MKVideoSave:
                 "格式": (["mp4", "webm", "gif"], {"default": "mp4"}),
                 "CRF": ("INT", {"default": 19, "min": 0, "max": 51, "step": 1}),
                 "模式": (["保存", "预览"], {"default": "保存"}),
+                "保存元数据": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "音频": ("AUDIO",),
@@ -376,7 +377,7 @@ class MKVideoSave:
     OUTPUT_NODE = True
 
     def combine_video(self, 图像, 帧率, 文件名前缀, 格式, CRF,
-                      模式, 音频=None,
+                      模式, 保存元数据, 音频=None,
                       prompt=None, extra_pnginfo=None, unique_id=None):
         if not isinstance(图像, torch.Tensor) or 图像.size(0) == 0:
             return ()

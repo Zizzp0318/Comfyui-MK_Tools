@@ -12,6 +12,7 @@ const _LABEL_MAP = {
     "CRF": "CRF",
     "模式": "Mode",
     "音频": "Audio",
+    "保存元数据": "Save Metadata",
     "保存": "Save",
     "预览": "Preview",
     "数值越大质量越差 默认19": "Higher = lower quality, default 19",
@@ -583,7 +584,7 @@ app.registerExtension({
                     } catch (_) {}
                 }
 
-                if (w.name === '帧率' || w.name === '文件名前缀' || w.name === '格式' || w.name === 'CRF' || w.name === '模式') {
+                if (w.name === '帧率' || w.name === '文件名前缀' || w.name === '格式' || w.name === 'CRF' || w.name === '模式' || w.name === '保存元数据') {
                     w._mkLabel = () => _tr(w.name);
                 }
 
@@ -666,6 +667,60 @@ app.registerExtension({
                             this.value = (this.value === '预览') ? '保存' : '预览';
                             node.setDirtyCanvas?.(true, true);
                             updateOutputDirDisplay();
+                            return true;
+                        }
+                        return true;
+                    };
+                } else if (w.name === '保存元数据') {
+                    w.draw = function(ctx, nd, width, y, H) {
+                        const _nW = nd?.size?.[0], _nH = nd?.size?.[1];
+                        if (_nW != null && _nW > 0) width = Math.max(1, Math.min(width, _nW));
+                        if (_nH != null && _nH > 0) H = Math.max(1, Math.min(H, Math.max(0, _nH - y)));
+                        this._mkDrawW = width;
+                        const pad = 16, r = 6, wr = width - pad * 2;
+                        ctx.fillStyle = '#2a2a2a';
+                        ctx.beginPath();
+                        if (ctx.roundRect) ctx.roundRect(pad, y + 1, wr, H - 2, r); else ctx.rect(pad, y + 1, wr, H - 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#444';
+                        ctx.stroke();
+                        ctx.fillStyle = '#9ab';
+                        ctx.font = '12px sans-serif';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText((this._mkLabel ? this._mkLabel() : '保存元数据'), pad + 6, y + H / 2);
+
+                        // 绘制开关
+                        const switchW = 40, switchH = 20;
+                        const switchX = width - pad - switchW - 6;
+                        const switchY = y + (H - switchH) / 2;
+                        const isOn = !!this.value;
+
+                        // 背景
+                        ctx.fillStyle = isOn ? '#4CAF50' : '#666';
+                        ctx.beginPath();
+                        if (ctx.roundRect) {
+                            ctx.roundRect(switchX, switchY, switchW, switchH, switchH / 2);
+                        } else {
+                            ctx.rect(switchX, switchY, switchW, switchH);
+                        }
+                        ctx.fill();
+
+                        // 滑块
+                        const circleR = switchH / 2 - 2;
+                        const circleX = isOn ? (switchX + switchW - circleR - 2) : (switchX + circleR + 2);
+                        const circleY = switchY + switchH / 2;
+                        ctx.fillStyle = '#fff';
+                        ctx.beginPath();
+                        ctx.arc(circleX, circleY, circleR, 0, Math.PI * 2);
+                        ctx.fill();
+                    };
+                    w.mouse = function(event, [x, y], node) {
+                        if (event.type === 'pointerdown') return true;
+                        if (event.type === 'pointerup') {
+                            this.value = !this.value;
+                            if (this.callback) this.callback(this.value);
+                            node.setDirtyCanvas?.(true, true);
                             return true;
                         }
                         return true;
