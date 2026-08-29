@@ -358,15 +358,9 @@ class MKVideoSave:
                 "格式": (["mp4", "webm", "gif"], {"default": "mp4"}),
                 "CRF": ("INT", {"default": 19, "min": 0, "max": 51, "step": 1}),
                 "保存到output": ("BOOLEAN", {"default": True}),
-                "保存元数据": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "音频": ("AUDIO",),
-            },
-            "hidden": {
-                "prompt": "PROMPT",
-                "extra_pnginfo": "EXTRA_PNGINFO",
-                "unique_id": "UNIQUE_ID",
             },
         }
 
@@ -377,8 +371,7 @@ class MKVideoSave:
     OUTPUT_NODE = True
 
     def combine_video(self, 图像, 帧率, 文件名前缀, 格式, CRF,
-                      保存到output, 保存元数据, 音频=None,
-                      prompt=None, extra_pnginfo=None, unique_id=None):
+                      保存到output, 音频=None):
         if not isinstance(图像, torch.Tensor) or 图像.size(0) == 0:
             return ()
 
@@ -416,23 +409,6 @@ class MKVideoSave:
             crf=CRF,
             audio=音频,
         )
-
-        # 保存元数据到 JSON 文件
-        if 保存元数据 and 保存到output:
-            metadata = {}
-            if prompt is not None:
-                metadata["prompt"] = prompt
-            if extra_pnginfo is not None:
-                metadata.update(extra_pnginfo)
-
-            if metadata:
-                json_file = f"{filename}_{counter:05}.json"
-                json_path = os.path.join(full_output_folder, json_file)
-                try:
-                    with open(json_path, 'w', encoding='utf-8') as f:
-                        json.dump(metadata, f, indent=2, ensure_ascii=False)
-                except Exception as e:
-                    print(f"[MK-视频保存] 保存元数据失败: {e}")
 
         ui = {
             "result": (),
