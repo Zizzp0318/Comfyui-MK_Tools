@@ -288,15 +288,40 @@ app.registerExtension({
                                 console.log(`[MK-视频加载] 上传进度: ${completed}/${total}`);
                             });
 
+                            // 确保视频格式兼容浏览器（转码为 H.264）
+                            let finalPath = videoPath;
+                            try {
+                                const h264Response = await fetch("/mk/video_ensure_h264", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                        filename: videoPath,
+                                        type: "input",
+                                        subfolder: "",
+                                        force: false,
+                                    }),
+                                });
+
+                                if (h264Response.ok) {
+                                    const h264Data = await h264Response.json();
+                                    if (h264Data.transcoded && h264Data.filename) {
+                                        finalPath = h264Data.filename;
+                                        console.log(`[MK-视频加载] 视频已转码为 H.264: ${finalPath}`);
+                                    }
+                                }
+                            } catch (error) {
+                                console.warn('[MK-视频加载] 视频格式检查失败，使用原始文件:', error);
+                            }
+
                             const videoWidget = node.widgets?.find(w => w.name === '视频');
                             if (videoWidget) {
-                                videoWidget.value = videoPath;
+                                videoWidget.value = finalPath;
                                 if (videoWidget.callback) {
-                                    videoWidget.callback(videoPath);
+                                    videoWidget.callback(finalPath);
                                 }
                             }
 
-                            const url = `/view?filename=${encodeURIComponent(videoPath)}&type=input`;
+                            const url = `/view?filename=${encodeURIComponent(finalPath)}&type=input`;
                             player.load(url);
 
                             node.setDirtyCanvas?.(true, true);
