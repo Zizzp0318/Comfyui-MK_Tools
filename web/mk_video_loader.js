@@ -237,11 +237,8 @@ app.registerExtension({
                 player.destroy();
             };
 
-            // 双击上传视频
-            playerContainer.addEventListener('dblclick', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-
+            // 添加上传视频按钮
+            const uploadButton = node.addWidget("button", "上传视频", null, () => {
                 const input = document.createElement('input');
                 input.type = 'file';
                 input.accept = VIDEO_EXTS.map(ext => `.${ext}`).join(',');
@@ -279,6 +276,7 @@ app.registerExtension({
 
                 input.click();
             });
+            uploadButton.serialize = false;
 
             // 监听视频 widget 变化
             const videoWidget = node.widgets?.find(w => w.name === '视频');
