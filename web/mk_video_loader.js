@@ -237,47 +237,6 @@ app.registerExtension({
                 player.destroy();
             };
 
-            // 添加上传视频按钮
-            const uploadButton = node.addWidget("button", "上传视频", null, () => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = VIDEO_EXTS.map(ext => `.${ext}`).join(',');
-                input.style.display = 'none';
-                document.body.appendChild(input);
-
-                input.onchange = async () => {
-                    const file = input.files?.[0];
-                    if (!file) return;
-
-                    try {
-                        const videoPath = await uploadVideoFile(file, (completed, total) => {
-                            console.log(`[MK-视频加载] 上传进度: ${completed}/${total}`);
-                        });
-
-                        const videoWidget = node.widgets?.find(w => w.name === '视频');
-                        if (videoWidget) {
-                            videoWidget.value = videoPath;
-                            if (videoWidget.callback) {
-                                videoWidget.callback(videoPath);
-                            }
-                        }
-
-                        const url = `/view?filename=${encodeURIComponent(videoPath)}&type=input`;
-                        player.load(url);
-
-                        node.setDirtyCanvas?.(true, true);
-                    } catch (error) {
-                        console.error('[MK-视频加载] 上传失败:', error);
-                        alert(`上传失败: ${error.message}`);
-                    } finally {
-                        input.remove();
-                    }
-                };
-
-                input.click();
-            });
-            uploadButton.serialize = false;
-
             // 监听视频 widget 变化
             const videoWidget = node.widgets?.find(w => w.name === '视频');
             if (videoWidget) {
@@ -299,6 +258,62 @@ app.registerExtension({
                     const url = `/view?filename=${encodeURIComponent(videoWidget.value)}&type=input`;
                     player.load(url);
                 }
+            }
+
+            // 找到"帧数上限" widget 的索引，在其后插入上传按钮
+            const maxFramesIndex = node.widgets?.findIndex(w => w.name === '帧数上限');
+            const uploadButtonIndex = maxFramesIndex >= 0 ? maxFramesIndex + 1 : node.widgets?.length || 0;
+
+            // 添加上传视频按钮
+            const uploadButton = {
+                type: "button",
+                name: "上传视频",
+                callback: () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = VIDEO_EXTS.map(ext => `.${ext}`).join(',');
+                    input.style.display = 'none';
+                    document.body.appendChild(input);
+
+                    input.onchange = async () => {
+                        const file = input.files?.[0];
+                        if (!file) return;
+
+                        try {
+                            const videoPath = await uploadVideoFile(file, (completed, total) => {
+                                console.log(`[MK-视频加载] 上传进度: ${completed}/${total}`);
+                            });
+
+                            const videoWidget = node.widgets?.find(w => w.name === '视频');
+                            if (videoWidget) {
+                                videoWidget.value = videoPath;
+                                if (videoWidget.callback) {
+                                    videoWidget.callback(videoPath);
+                                }
+                            }
+
+                            const url = `/view?filename=${encodeURIComponent(videoPath)}&type=input`;
+                            player.load(url);
+
+                            node.setDirtyCanvas?.(true, true);
+                        } catch (error) {
+                            console.error('[MK-视频加载] 上传失败:', error);
+                            alert(`上传失败: ${error.message}`);
+                        } finally {
+                            input.remove();
+                        }
+                    };
+
+                    input.click();
+                },
+                serialize: false,
+            };
+
+            // 插入到指定位置
+            if (node.widgets) {
+                node.widgets.splice(uploadButtonIndex, 0, uploadButton);
+            } else {
+                node.widgets = [uploadButton];
             }
 
             const origOnRemoved = node.onRemoved;
