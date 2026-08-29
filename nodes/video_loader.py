@@ -521,6 +521,7 @@ class MKVideoLoader:
                 "自定义高度": ("INT", {"default": 0, "min": 0, "max": DIMMAX, "step": 8}),
                 "跳过帧数": ("INT", {"default": 0, "min": 0, "max": BIGMAX, "step": 1}),
                 "帧数上限": ("INT", {"default": 0, "min": 0, "max": BIGMAX, "step": 1}),
+                "批处理大小": ("INT", {"default": 200, "min": 50, "max": 1000, "step": 50}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -534,7 +535,7 @@ class MKVideoLoader:
     OUTPUT_NODE = True
 
     def load_video(self, 视频, 强制帧率=0, 视频比例="原始比例", 自定义宽度=0, 自定义高度=0,
-                   帧数上限=0, 跳过帧数=0, unique_id=None):
+                   帧数上限=0, 跳过帧数=0, 批处理大小=200, unique_id=None):
         强制帧率 = int(强制帧率)
         video_path = folder_paths.get_annotated_filepath(视频)
         if not video_path or not os.path.isfile(video_path):
@@ -569,20 +570,42 @@ class MKVideoLoader:
         (src_w, src_h, src_fps, src_dur, src_frames,
          target_frame_time, yieldable, new_w, new_h, alpha) = info
 
-        frames = []
+        # 分批处理帧以优化内存使用
+        batch_size = max(50, min(1000, int(批处理大小)))
+        channels = 4 if alpha else 3
+        frame_batches = []
+        current_batch = []
+        total_frames = 0
+
         try:
             for frame in gen:
-                frames.append(frame)
+                current_batch.append(frame)
+                total_frames += 1
+
+                # 当批次达到指定大小时，转换为tensor并存储
+                if len(current_batch) >= batch_size:
+                    batch_tensor = torch.from_numpy(
+                        np.stack(current_batch).astype(np.float32)
+                    ).view(-1, new_h, new_w, channels)
+                    frame_batches.append(batch_tensor)
+                    current_batch = []
+
         except StopIteration:
             pass
 
-        if not frames:
+        # 处理最后一个不完整的批次
+        if current_batch:
+            batch_tensor = torch.from_numpy(
+                np.stack(current_batch).astype(np.float32)
+            ).view(-1, new_h, new_w, channels)
+            frame_batches.append(batch_tensor)
+            current_batch = []
+
+        if not frame_batches:
             raise RuntimeError("No frames decoded from video")
 
-        channels = 4 if alpha else 3
-        image_tensor = torch.from_numpy(
-            np.stack(frames).astype(np.float32)
-        ).view(-1, new_h, new_w, channels)
+        # 合并所有批次
+        image_tensor = torch.cat(frame_batches, dim=0)
 
         loaded_fps = 1.0 / target_frame_time if target_frame_time > 0 else src_fps
         loaded_count = image_tensor.shape[0]
