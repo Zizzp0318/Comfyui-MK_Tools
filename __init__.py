@@ -15,6 +15,7 @@ from .nodes.video_save import NODE_CLASS_MAPPINGS as VIDEO_SAVE_MAPPINGS
 from .nodes.image_crop import NODE_CLASS_MAPPINGS as IMAGE_CROP_MAPPINGS
 from .nodes.resolution_selector import NODE_CLASS_MAPPINGS as RESOLUTION_SELECTOR_MAPPINGS
 from .nodes.image_loader import NODE_CLASS_MAPPINGS as IMAGE_LOADER_MAPPINGS
+from .nodes.mute_bypass import NODE_CLASS_MAPPINGS as MUTE_BYPASS_MAPPINGS
 
 # 合并所有节点映射
 NODE_CLASS_MAPPINGS = {
@@ -30,6 +31,7 @@ NODE_CLASS_MAPPINGS = {
     **IMAGE_CROP_MAPPINGS,
     **RESOLUTION_SELECTOR_MAPPINGS,
     **IMAGE_LOADER_MAPPINGS,
+    **MUTE_BYPASS_MAPPINGS,
 }
 
 # 节点显示名称映射
@@ -46,6 +48,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MK_ImageCrop": "MK-图像裁剪",
     "MK_ResolutionSelector": "MK-分辨率选择器",
     "MK_ImageLoader": "MK-加载图像",
+    "MK_MuteBypass": "MK-禁音（忽略）",
 }
 
 # Web 目录
